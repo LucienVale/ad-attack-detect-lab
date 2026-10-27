@@ -55,8 +55,7 @@ Before any attack, I confirmed the full logging chain was healthy.
 
 **4. End-to-end smoke test.** Sent a single deliberately-bad SMB authentication from Kali and confirmed the resulting failed logon appeared in the Wazuh dashboard — proving the pipeline worked from event to dashboard.
 
-<!-- SCREENSHOT #1: The smbclient login attempt from Kali showing the share listing (ADMIN$, C$, Finance, etc.). This is the pre-flight reachability test. -->
-
+![smbclient share listing during pre-flight](screenshot1.png.png)
 ### Finding #1 — Blank-password domain account
 
 During pre-flight I discovered a standard domain account had been configured (intentionally, as a planted misconfiguration) with a **blank password**. Share enumeration against the DC succeeded with no credentials supplied.
@@ -92,7 +91,7 @@ A host-based agent like Wazuh watches **logs on the host** — logons, process c
 
 This is the defining limitation of host-based detection, and it sets up the contrast with Round 3, where host + Sysmon telemetry proves *devastatingly* effective against on-box command execution. **Right tool, right layer.**
 
-<!-- SCREENSHOT: (optional) your nmap scan output from Kali, if you want to include it. Skip if you don't have a clean one. -->
+
 
 ---
 
@@ -120,7 +119,7 @@ This is both a convenience (unlimited clean spray attempts for the lab) and a re
 
 **Severity:** Medium–High. **Remediation:** Set a lockout threshold (e.g., 5) with an appropriate observation window; monitor for 4740 (account lockout) events.
 
-<!-- SCREENSHOT #2: The PowerShell output of Get-ADDefaultDomainPasswordPolicy showing LockoutThreshold: 0. -->
+![Domain password policy showing LockoutThreshold 0](screenshot2.png.png)
 
 ### Step 2 — Enumerating real usernames
 
@@ -136,7 +135,7 @@ This returned the true `sAMAccountName` for every account — confirming that se
 
 The blank-password account allowed a full dump of the domain user list over MS-RPC/SAMR with no valid credentials. This demonstrates concretely *why* Finding #1 is dangerous: one weak account exposes the entire roster, which directly enables a targeted spray.
 
-<!-- SCREENSHOT #3: The nxc --users output showing the full list of domain accounts (Administrator, Lucien, John.Smith, Maria.buena, labadmin, etc.) and "Pwn3d!". -->
+![nxc enumerating all domain users](screenshot3.png.png)
 
 ### Step 3 — The spray
 
@@ -144,7 +143,7 @@ I sprayed a single password across the 11 real accounts. (Tooling note below exp
 
 **Attacker view:** 11 × `NT_STATUS_LOGON_FAILURE` — one per account. Every account existed; every password was rejected.
 
-<!-- SCREENSHOT #4: The Kali terminal showing 11 × "session setup failed: NT_STATUS_LOGON_FAILURE". -->
+![Kali: 11 failed logon attempts from the spray](screenshot4.png.png)
 
 **Defender view (the three layers):**
 
@@ -153,7 +152,7 @@ I sprayed a single password across the 11 real accounts. (Tooling note below exp
 | 60122 (×11) | Security 4625 | 5 | Individual failed logons (atomic noise) |
 | **60204 (×1)** | **Correlation** | **10** | **"Multiple Windows Logon Failures" — the spray detected as a pattern** |
 
-<!-- SCREENSHOT #5: The Wazuh event list showing the cluster of 60122 (Logon Failure) events AND the 60204 "Multiple Windows Logon Failures" (Level 10) alert, with matching timestamps. This is the key Round 2 artifact. -->
+![Wazuh: 60122 failed-logon flood and the 60204 correlation alert](screenshot5.png.png)
 
 ### Finding #5 — Correlation is the real detection
 
@@ -174,7 +173,7 @@ The subStatus code tells an analyst *what kind* of attack this is:
 
 Because this spray showed `0xc000006a` across the board, the logs themselves reveal that the attacker had already enumerated valid accounts (Finding #4) and was working passwords — the more advanced and dangerous signal. Reading this one hex field is what distinguishes profiling an attacker from merely counting red events.
 
-<!-- SCREENSHOT #6: An expanded 4625 event showing data.win.eventdata.status 0xc000006d and subStatus 0xc000006a. -->
+![Expanded 4625 event showing subStatus 0xc000006a](screenshot6.png.png)
 
 ### Tooling note — isolating an nxc fault by layered testing
 
@@ -215,7 +214,7 @@ The account name `svc_backup` was chosen deliberately to blend in with legitimat
 | 60109 | Security 4720 | 8 | Account created/enabled |
 | 60110 | Security 4738 | 8 | Account properties changed |
 
-<!-- SCREENSHOT #7: The Wazuh event cluster showing 92040 (net1.exe user creation, Level 12), 60109 (User account enabled or created), and 60110 (User account changed), all at the same timestamp. Expand the 92040 event to show data.win.eventdata.commandLine with the full net1 command. -->
+![Wazuh: account creation caught by Sysmon and Security log](screenshot7.png.png)
 
 ### Finding #7 — Account-management events, not logon events
 
@@ -245,9 +244,9 @@ A standard user is harmless; the moment it joins **Domain Admins**, it becomes a
 | **60159** | **Security 4728** | **12** | **"Domain Admins Group Changed" — the high-value override rule** |
 | 60148 | Security 4728 | 5 | "Security Enabled Global Group Changed" — generic baseline rule |
 
-<!-- SCREENSHOT #8: The Wazuh event list showing 60159 "Domain Admins Group Changed" (Level 12) and 60148 "Security Enabled Global Group Changed" (Level 5), both at 17:54. -->
+![Wazuh: Domain Admins group change, Level 12 and Level 5 rules](screenshot8.png.png)
 
-<!-- SCREENSHOT #9: The expanded 4728 event showing eventID 4728, targetUserName "Domain Admins", targetSid ending in -512, memberName CN=svc_backup, and subjectUserName "Lucien" (the actor). -->
+![Expanded 4728 event showing svc_backup added to Domain Admins](screenshot9.png.png)
 
 ### Finding #9 — Full attribution from a single 4728 event
 
